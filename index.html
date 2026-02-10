@@ -22,6 +22,11 @@
       padding: 16px;
       margin-bottom: 16px;
     }
+    label {
+      display: block;
+      margin-bottom: 6px;
+      opacity: 0.9;
+    }
     select, input, button {
       width: 100%;
       padding: 14px;
@@ -29,29 +34,43 @@
       border-radius: 10px;
       border: none;
       margin-top: 8px;
+      box-sizing: border-box;
     }
     button {
       background: #22c55e;
       color: #052e16;
-      font-weight: 600;
+      font-weight: 700;
     }
     .remaining {
       font-size: 48px;
-      font-weight: 700;
+      font-weight: 800;
       text-align: center;
       margin: 10px 0;
+      letter-spacing: -1px;
     }
     .sub {
       text-align: center;
-      opacity: 0.7;
+      opacity: 0.75;
     }
     ul {
       padding-left: 16px;
+      margin: 12px 0 0 0;
     }
     li {
       display: flex;
       justify-content: space-between;
       margin: 6px 0;
+      opacity: 0.95;
+    }
+    .suggestions {
+      margin-top: 12px;
+      line-height: 1.7;
+    }
+    .suggestions strong {
+      opacity: 0.95;
+    }
+    .muted {
+      opacity: 0.7;
     }
   </style>
 </head>
@@ -60,7 +79,7 @@
   <h1>Protein Remaining</h1>
 
   <div class="card">
-    <label>Day Type</label>
+    <label for="dayType">Day Type</label>
     <select id="dayType">
       <option value="lift">Lift</option>
       <option value="peloton">Peloton</option>
@@ -72,9 +91,9 @@
   </div>
 
   <div class="card">
-    <label>Add Meal (protein grams)</label>
-    <input type="number" id="proteinInput" placeholder="e.g. 36" />
-    <button onclick="addMeal()">Add</button>
+    <label for="proteinInput">Add Meal (protein grams)</label>
+    <input type="number" id="proteinInput" placeholder="e.g. 36" inputmode="numeric" />
+    <button type="button" onclick="addMeal()">Add</button>
   </div>
 
   <div class="card">
@@ -82,56 +101,110 @@
     <ul id="log"></ul>
   </div>
 
+  <div class="card">
+    <strong>Dinner suggestion (raw weight to hit remaining)</strong>
+    <div class="sub" style="margin-top:8px;">
+      Suggestions use a 10g buffer (you still see true remaining above).
+    </div>
+    <div id="suggestions" class="suggestions"></div>
+  </div>
+
 <script>
-const targets = {
-  lift: 190,
-  peloton: 175,
-  rest: 165
-};
+  // Daily protein targets
+  const targets = {
+    lift: 190,
+    peloton: 175,
+    rest: 165
+  };
 
-const today = new Date().toISOString().slice(0,10);
-const storageKey = `protein-${today}`;
+  // --- Protein densities (raw) approx grams protein per 100g ---
+  // These are good defaults; real-world values vary by cut/brand.
+  const proteinPer100g = {
+    chicken: 22.5, // raw chicken breast
+    salmon: 20.5,  // raw Atlantic salmon
+    sirloin: 20.7  // raw top sirloin
+  };
 
-let data = JSON.parse(localStorage.getItem(storageKey)) || {
-  dayType: "lift",
-  meals: []
-};
+  const DINNER_BUFFER_G = 10;
 
-document.getElementById("dayType").value = data.dayType;
+  function roundToHalfOz(oz) {
+    return Math.round(oz * 2) / 2;
+  }
 
-function update() {
-  const target = targets[data.dayType];
-  const total = data.meals.reduce((a,b) => a + b, 0);
-  const remaining = Math.max(target - total, 0);
+  function gramsToOz(g) {
+    return g / 28.3495;
+  }
 
-  document.getElementById("remaining").textContent = `${remaining}g`;
-  document.getElementById("summary").textContent = `${total}g / ${target}g consumed`;
+  function suggestionLine(name, gramsRemainingTrue) {
+    const gramsForDinner = Math.max(gramsRemainingTrue - DINNER_BUFFER_G, 0);
+    const gPer100 = proteinPer100g[name];
 
-  const log = document.getElementById("log");
-  log.innerHTML = "";
-  data.meals.forEach((m, i) => {
-    const li = document.createElement("li");
-    li.innerHTML = `<span>${m}g</span><span>✓</span>`;
-    log.appendChild(li);
+    // gramsNeededRaw * (gPer100/100) = gramsForDinner  => gramsNeededRaw = gramsForDinner * 100 / gPer100
+    const gramsNeededRaw = (gramsForDinner * 100) / gPer100;
+    const ozNeededRaw = roundToHalfOz(gramsToOz(gramsNeededRaw));
+
+    const label = name.charAt(0).toUpperCase() + name.slice(1);
+
+    return `
+      <div>
+        <strong>${label}:</strong> ${ozNeededRaw.toFixed(1)} oz raw
+        <span class="muted">(~${Math.round(gramsNeededRaw)}g)</span>
+      </div>
+    `;
+  }
+
+  // Per-day storage key (auto "resets" each calendar day)
+  const today = new Date().toISOString().slice(0,10);
+  const storageKey = `protein-${today}`;
+
+  let data = JSON.parse(localStorage.getItem(storageKey)) || {
+    dayType: "lift",
+    meals: []
+  };
+
+  document.getElementById("dayType").value = data.dayType;
+
+  function update() {
+    const target = targets[data.dayType];
+    const total = data.meals.reduce((a, b) => a + b, 0);
+    const remaining = Math.max(target - total, 0);
+
+    document.getElementById("remaining").textContent = `${remaining}g`;
+    document.getElementById("summary").textContent = `${total}g / ${target}g consumed`;
+
+    const log = document.getElementById("log");
+    log.innerHTML = "";
+    data.meals.forEach((m) => {
+      const li = document.createElement("li");
+      li.innerHTML = `<span>${m}g</span><span>✓</span>`;
+      log.appendChild(li);
+    });
+
+    // Dinner suggestions (single protein) using a 10g buffer
+    const suggestionsEl = document.getElementById("suggestions");
+    suggestionsEl.innerHTML = [
+      suggestionLine("chicken", remaining),
+      suggestionLine("salmon", remaining),
+      suggestionLine("sirloin", remaining),
+    ].join("");
+
+    localStorage.setItem(storageKey, JSON.stringify(data));
+  }
+
+  document.getElementById("dayType").addEventListener("change", (e) => {
+    data.dayType = e.target.value;
+    update();
   });
 
-  localStorage.setItem(storageKey, JSON.stringify(data));
-}
+  function addMeal() {
+    const val = Number(document.getElementById("proteinInput").value);
+    if (!val || val <= 0) return;
+    data.meals.push(val);
+    document.getElementById("proteinInput").value = "";
+    update();
+  }
 
-document.getElementById("dayType").addEventListener("change", e => {
-  data.dayType = e.target.value;
   update();
-});
-
-function addMeal() {
-  const val = Number(document.getElementById("proteinInput").value);
-  if (!val) return;
-  data.meals.push(val);
-  document.getElementById("proteinInput").value = "";
-  update();
-}
-
-update();
 </script>
 </body>
 </html>
